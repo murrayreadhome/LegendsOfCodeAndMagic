@@ -447,7 +447,7 @@ class Player
 public:
     Deck deck;
     vector<int> cost_counts;
-    const vector<int> wanted = { 0, 6, 5, 4, 4, 4, 0, 0 };
+    const vector<int> wanted = { 0, 5, 4, 3, 3, 3, 0, 0 };
 
     Player()
         : cost_counts(8, 0)
@@ -529,6 +529,60 @@ public:
             }
         }
         return { best_action, best_score };
+    }
+
+    pair<vector<Action>, double> find_best_creature_kill(const VisibleState& state, BoardCards& opBoard)
+    {
+        vector<Action> best_actions, actions;
+        double best_score = -1e9;
+        double init_score = score_state(state);
+
+        MaxVector<int,6> attackers;
+        int max_attack = 0;
+        for (const Card& card : state.myBoard)
+        {
+            if (card.used)
+                continue;
+            max_attack += card.attack;
+            if (card.lethal)
+                max_attack += 100;
+            attackers.push_back(card.instanceId);
+        }
+
+        for (const Card& op : opBoard)
+        {
+            if (max_attack < op.defense)
+                continue;
+            int opId = op.instanceId;
+            sort(attackers.begin(), attackers.end());
+            do 
+            {
+                VisibleState tmp = state;
+                actions.clear();
+                bool killed = false;
+                for (int id : attackers)
+                {
+                    Action attack = { Action::ATTACK, id, opId };
+                    if (!tmp.can(attack))
+                        break;
+                    actions.push_back(attack);
+                    tmp.act(attack);
+                    if (!tmp.get_card(tmp.opBoard, opId))
+                    {
+                        killed = true;
+                        break;
+                    }
+                }
+                double score = score_state(tmp) - init_score;
+                if (score > best_score)
+                {
+                    best_score = score;
+                    best_actions = actions;
+                }
+            } while (next_permutation(attackers.begin(), attackers.end()));
+        }
+
+        return { best_actions, best_score };
     }
 
     vector<Action> battleAction(const VisibleState& in_state)
@@ -640,15 +694,29 @@ public:
             add_action(attack.first);
         }
 
-        // attack creatures
-        for (;;)
+        // instant kill test
+        VisibleState instant_kill = state;
+        for (const Card& card : state.myBoard)
         {
-            pair<Action, double> attack = find_best_creature_attack(state, opCreature);
-            if (attack.first.what != Action::ATTACK)
-                break;
-            if (attack.second < 0)
-                break;
-            add_action(attack.first);
+            if (card.used)
+                continue;
+            Action face_hit = { Action::ATTACK, card.instanceId, -1 };
+            instant_kill.act(face_hit);
+        }
+
+        if (instant_kill.op.health > 0)
+        {
+            // attack creatures
+            for (;;)
+            {
+                pair<vector<Action>, double> attack = find_best_creature_kill(state, opCreature);
+                if (attack.first.empty())
+                    break;
+                if (attack.second < 0)
+                    break;
+                for (auto action : attack.first)
+                    add_action(action);
+            }
         }
 
         // attack
