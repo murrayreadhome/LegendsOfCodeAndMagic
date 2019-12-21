@@ -6,6 +6,6 @@ cmake_minimum_required (VERSION 3.8)
 add_compile_definitions(DEVELOPMENT)
 
 # Add source to this project's executable.
-add_executable (LegendsOfCodeAndMagic "LegendsOfCodeAndMagic.cpp" "LegendsOfCodeAndMagic.h")
+add_executable (LegendsOfCodeAndMagic "LegendsOfCodeAndMagic.cpp" "LegendsOfCodeAndMagic.h" "CardInfo.cpp" "CardInfo.h")
 
 # TODO: Add tests and install targets if needed.

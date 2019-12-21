@@ -10,7 +10,7 @@ using namespace std;
 #ifdef NDEBUG
 #define check(b)
 #else
-void check(bool b) 
+inline void check(bool b) 
 {
     if (!b)
         throw std::runtime_error("check failed");
@@ -131,7 +131,7 @@ void remove_card(Card& card, T& cards)
 typedef MaxVector<Card, 6> BoardCards;
 typedef MaxVector<Card, 8> HandCards;
 
-struct VisibleState
+struct SinglePlayerState
 {
     bool draw_phase;
     PlayerState me;
@@ -139,6 +139,17 @@ struct VisibleState
     HandCards myHand;
     BoardCards myBoard;
     BoardCards opBoard;
+};
+
+template <typename T>
+struct GameRules : public T
+{
+    using T::draw_phase;
+    using T::me;
+    using T::op;
+    using T::myHand;
+    using T::myBoard;
+    using T::opBoard;
 
     bool can(const Action& action) const
     {
@@ -353,14 +364,16 @@ struct VisibleState
     }
 };
 
-istream& operator>>(istream& in, PlayerState& player)
+typedef GameRules<SinglePlayerState> VisibleState;
+
+inline istream& operator>>(istream& in, PlayerState& player)
 {
     in >> player.health >> player.mana >> player.deck >> player.rune >> player.draw;
     in.ignore();
     return in;
 }
 
-istream& operator>>(istream& in, Card& card)
+inline istream& operator>>(istream& in, Card& card)
 {
     string abilities;
     in >> card.number >> card.instanceId >> card.location >> card.cardType >> card.cost >> card.attack >> card.defense >> abilities >> card.myHealthChange >> card.opponentHealthChange >> card.cardDraw;
@@ -370,7 +383,7 @@ istream& operator>>(istream& in, Card& card)
     return in;
 }
 
-istream& operator>>(istream& in, VisibleState& state)
+inline istream& operator>>(istream& in, VisibleState& state)
 {
     in >> state.me;
     in >> state.op;
@@ -409,7 +422,7 @@ istream& operator>>(istream& in, VisibleState& state)
     return in;
 }
 
-ostream& operator<<(ostream& out, const Action& action)
+inline ostream& operator<<(ostream& out, const Action& action)
 {
     const char* names[] = { "PICK", "SUMMON", "ATTACK", "USE", "PASS" };
     out << names[action.what];
@@ -478,10 +491,10 @@ public:
 
     double card_value(const Card& c)
     {
-        double d = c.defense;
+        double d = max(1, c.defense);
         if (c.guard)
             d *= 2;
-        double a = c.attack;
+        double a = max(1, c.attack);
         if (c.lethal)
             a = max(a, 5.0);
         if (c.drain)
@@ -735,7 +748,7 @@ public:
     }
 };
 
-void codingame_loop()
+inline void codingame_loop()
 {
     Player player;
 
