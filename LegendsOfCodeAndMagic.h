@@ -8,12 +8,15 @@
 using namespace std;
 
 #ifdef NDEBUG
-#define check(b)
+#define check(b, msg)
 #else
-inline void check(bool b) 
+inline void check(bool b, char* msg)
 {
     if (!b)
+    {
+        cerr << msg << endl;
         throw std::runtime_error("check failed");
+    }
 };
 #endif
 
@@ -29,8 +32,8 @@ public:
     bool empty() const { return n == 0; }
     bool full() const { return n == N; }
 
-    void push_back(const T& t) { check(!full()); (*this)[n++] = t; }
-    void pop_back() { check(!empty()); n--; }
+    void push_back(const T& t) { check(!full(), "full"); (*this)[n++] = t; }
+    void pop_back() { check(!empty(), "empty"); n--; }
 
     T& back() { return (*this)[n - 1]; }
     const T& back() const { return (*this)[n - 1]; }
@@ -455,6 +458,27 @@ auto find_best(It begin, It end, Eval eval) -> pair<It, decltype(eval(*begin))>
     return { best, bestSc };
 }
 
+struct StateChange
+{
+    VisibleState state;
+    vector<Action> actions;
+
+    void add(const Action& action)
+    {
+        actions.push_back(action);
+        state.act(action);
+    }
+
+    template<typename T>
+    void add(const T& actions)
+    {
+        for (const Action& action : actions)
+            add(action);
+    }
+};
+
+const double bad_score = -1e9;
+
 class Player
 {
 public:
@@ -518,7 +542,7 @@ public:
 
     pair<Action, double> find_best_creature_attack(const VisibleState& state, BoardCards& opBoard)
     {
-        double best_score = -1e9;
+        double best_score = bad_score;
         Action best_action = { Action::PASS };
         double init_score = score_state(state);
         for (const Card& my : state.myBoard)
@@ -547,7 +571,7 @@ public:
     pair<vector<Action>, double> find_best_creature_kill(const VisibleState& state, BoardCards& opBoard)
     {
         vector<Action> best_actions, actions;
-        double best_score = -1e9;
+        double best_score = bad_score;
         double init_score = score_state(state);
 
         MaxVector<int,6> attackers;
@@ -598,21 +622,167 @@ public:
         return { best_actions, best_score };
     }
 
-    vector<Action> battleAction(const VisibleState& in_state)
+    void play_greedy_card(StateChange& change, const Card& card)
     {
-        vector<Action> actions;
-        VisibleState state = in_state;
-
-        auto add_action = [&](const Action& action)
+        switch (card.cardType)
         {
-            actions.push_back(action);
-            state.act(action);
+        case Creature:
+        {
+            Action summon = { Action::SUMMON, card.instanceId };
+            if (change.state.can(summon))
+            {
+                change.add(summon);
+            }
+            break;
+        }
+        case Green:
+        {
+            auto best = find_best(change.state.myBoard.begin(), change.state.myBoard.end(), [&](const Card& myCard)
+            {
+                Action use = { Action::USE, card.instanceId, myCard.instanceId };
+                if (!change.state.can(use))
+                    return bad_score;
+                VisibleState tmp_state = change.state;
+                tmp_state.act(use);
+                return score_state(tmp_state);
+            });
+            if (best.second > bad_score && best.first != change.state.myBoard.end())
+            {
+                Action use = { Action::USE, card.instanceId, best.first->instanceId };
+                change.add(use);
+            }
+            break;
+        }
+        case Blue:
+            if (card.defense == 0)
+            {
+                Action use = { Action::USE, card.instanceId, -1 };
+                if (change.state.can(use))
+                {
+                    change.add(use);
+                }
+                break;
+            }
+            // else deliberate fall through
+        case Red:
+        {
+            auto best = find_best(change.state.opBoard.begin(), change.state.opBoard.end(), [&](const Card& opCard)
+            {
+                Action use = { Action::USE, card.instanceId, opCard.instanceId };
+                if (!change.state.can(use))
+                    return bad_score;
+                VisibleState tmp_state = change.state;
+                tmp_state.act(use);
+                return score_state(tmp_state);
+            });
+            if (best.second > bad_score && best.first != change.state.opBoard.end())
+            {
+                Action use = { Action::USE, card.instanceId, best.first->instanceId };
+                change.add(use);
+            }
+            break;
+        }
+        }
+    }
+
+    pair<vector<Action>, double> greedy_spend(const VisibleState& in_state)
+    {
+        StateChange change{ in_state };
+        
+        bool found = true;
+        while (found)
+        {
+            sort(change.state.myHand.begin(), change.state.myHand.end(), [](const Card& a, const Card& b) { return a.cost > b.cost; });
+            found = false;
+            double current_score = score_state(change.state);
+
+            for (Card& card : change.state.myHand)
+            {
+                size_t before = change.actions.size();
+                play_greedy_card(change, card);
+                found = change.actions.size() > before;
+                if (found)
+                    break;
+            }
+        }
+
+        return { change.actions, score_state(change.state) };
+    }
+
+    pair<vector<Action>, double> deploy_cards(const VisibleState& in_state, HandCards cards)
+    {
+        StateChange change{ in_state };
+
+        // creatures first
+        sort(cards.begin(), cards.end(), [](const Card& a, const Card& b) { return a.cardType < b.cardType; });
+        for (const Card& card : cards)
+            play_greedy_card(change, card);
+
+        return { change.actions, score_state(change.state) };
+    }
+
+    vector<Action> find_best_spend(const VisibleState& in_state)
+    {
+        vector<Action> best_actions;
+        double best_score;
+        tie(best_actions, best_score) = greedy_spend(in_state);
+
+        struct BestCards
+        {
+            double score;
+            HandCards cards;
         };
 
+        int m = in_state.me.mana;
+        vector<BestCards> best_cards(m + 1, { bad_score });
+
+        HandCards held = in_state.myHand;
+        sort(held.begin(), held.end(), [](const Card& a, const Card& b) { return a.cost < b.cost; });
+        for (const Card& card : held)
+        {
+            for (int i = 0; i <= m - card.cost; i++)
+            {
+                const BestCards& from = best_cards[i];
+                if (i > 0 && from.cards.empty())
+                    continue;
+
+                HandCards new_cards = from.cards;
+                if (new_cards.full())
+                    continue;
+                new_cards.push_back(card);
+                pair<vector<Action>, double> deployment = deploy_cards(in_state, new_cards);
+
+                BestCards& to = best_cards[i + card.cost];
+                if (to.cards.empty() || to.score < deployment.second)
+                {
+                    to.cards = new_cards;
+                    to.score = deployment.second;
+                }
+
+                if (deployment.second > best_score)
+                {
+                    best_score = deployment.second;
+                    best_actions = deployment.first;
+                }
+            }
+        }
+
+        return best_actions;
+    }
+
+    vector<Action> battleAction(const VisibleState& in_state)
+    {
+        StateChange change{ in_state };
+
+        // spend mana from most to least expensive card
+        vector<Action> spend = find_best_spend(change.state);
+        change.add(spend);
+
+        // attack guards
         MaxVector<Card, 6> opGuard;
         MaxVector<Card, 6> opCreature;
 
-        for (const Card& card : state.opBoard)
+        for (const Card& card : change.state.opBoard)
         {
             if (card.guard)
                 opGuard.push_back(card);
@@ -620,96 +790,17 @@ public:
                 opCreature.push_back(card);
         }
 
-        // spend mana from most to least expensive card
-        bool found = true;
-        while (found)
-        {
-            sort(state.myHand.begin(), state.myHand.end(), [](const Card& a, const Card& b) { return a.cost > b.cost; });
-            found = false;
-            double current_score = score_state(state);
-
-            for (Card& card : state.myHand)
-            {
-                switch (card.cardType)
-                {
-                case Creature:
-                {
-                    Action summon = { Action::SUMMON, card.instanceId };
-                    if (state.can(summon))
-                    {
-                        add_action(summon);
-                        found = true;
-                    }
-                    break;
-                }
-                case Green:
-                {
-                    auto best = find_best(state.myBoard.begin(), state.myBoard.end(), [&](const Card& myCard)
-                    {
-                        Action use = { Action::USE, card.instanceId, myCard.instanceId };
-                        if (!state.can(use))
-                            return -1.0;
-                        VisibleState tmp_state = state;
-                        tmp_state.act(use);
-                        return score_state(tmp_state);
-                    });
-                    if (best.first != state.myBoard.end() && best.second > current_score)
-                    {
-                        Action use = { Action::USE, card.instanceId, best.first->instanceId };
-                        add_action(use);
-                        found = true;
-                    }
-                    break;
-                }
-                case Blue:
-                    if (card.defense == 0)
-                    {
-                        Action use = { Action::USE, card.instanceId, -1 };
-                        if (state.can(use))
-                        {
-                            add_action(use);
-                            found = true;
-                        }
-                        break;
-                    }
-                    // else deliberate fall through
-                case Red:
-                {
-                    auto best = find_best(state.opBoard.begin(), state.opBoard.end(), [&](const Card& opCard)
-                    {
-                        Action use = { Action::USE, card.instanceId, opCard.instanceId };
-                        if (!state.can(use))
-                            return -1.0;
-                        VisibleState tmp_state = state;
-                        tmp_state.act(use);
-                        return score_state(tmp_state) - current_score;
-                    });
-                    if (best.first != state.opBoard.end() && best.second > 0)
-                    {
-                        Action use = { Action::USE, card.instanceId, best.first->instanceId };
-                        add_action(use);
-                        found = true;
-                    }
-                    break;
-                }
-                }
-                if (found)
-                    break;
-            }
-        }
-
-        // attack guards
         while (!opGuard.empty())
         {
-            pair<Action, double> attack = find_best_creature_attack(state, opGuard);
+            pair<Action, double> attack = find_best_creature_attack(change.state, opGuard);
             if (attack.first.what != Action::ATTACK)
                 break;
-            add_action(attack.first);
+            change.add(attack.first);
         }
 
         // instant kill test
-        VisibleState instant_kill = state;
-        for (const Card& card : state.myBoard)
+        VisibleState instant_kill = change.state;
+        for (const Card& card : instant_kill.myBoard)
         {
             if (card.used)
                 continue;
@@ -722,29 +813,29 @@ public:
             // attack creatures
             for (;;)
             {
-                pair<vector<Action>, double> attack = find_best_creature_kill(state, opCreature);
+                pair<vector<Action>, double> attack = find_best_creature_kill(change.state, opCreature);
                 if (attack.first.empty())
                     break;
                 if (attack.second < 0)
                     break;
                 for (auto action : attack.first)
-                    add_action(action);
+                    change.add(action);
             }
         }
 
         // attack
-        for (const Card& card : state.myBoard)
+        for (const Card& card : change.state.myBoard)
         {
             if (card.used)
                 continue;
             Action face_hit = { Action::ATTACK, card.instanceId, -1 };
-            add_action(face_hit);
+            change.add(face_hit);
         }
 
-        if (actions.empty())
-            actions.push_back({ Action::PASS });
+        if (change.actions.empty())
+            change.actions.push_back({ Action::PASS });
 
-        return actions;
+        return change.actions;
     }
 };
 
