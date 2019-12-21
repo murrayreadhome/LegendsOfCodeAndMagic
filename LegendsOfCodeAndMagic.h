@@ -802,10 +802,18 @@ public:
 
         while (!opGuard.empty())
         {
-            pair<Action, double> attack = find_best_creature_attack(change.state, opGuard);
-            if (attack.first.what != Action::ATTACK)
-                break;
-            change.add(attack.first);
+            pair<vector<Action>, double> attack = find_best_creature_kill(change.state, opGuard);
+            if (attack.first.empty())
+            {
+                pair<Action, double> attack = find_best_creature_attack(change.state, opGuard);
+                if (attack.first.what != Action::ATTACK)
+                    break;
+                change.add(attack.first);
+            }
+            else
+            {
+                change.add(attack.first);
+            }
         }
 
         // split the remaining attacks
