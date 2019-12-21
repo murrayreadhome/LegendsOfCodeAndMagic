@@ -1,4 +1,6 @@
-﻿#include <iostream>
+﻿#pragma once
+
+#include <iostream>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -31,6 +33,8 @@ public:
     size_t size() const { return n; }
     bool empty() const { return n == 0; }
     bool full() const { return n == N; }
+
+    void clear() { n = 0; }
 
     void push_back(const T& t) { check(!full(), "full"); (*this)[n++] = t; }
     void pop_back() { check(!empty(), "empty"); n--; }
@@ -153,6 +157,13 @@ struct GameRules : public T
     using T::myHand;
     using T::myBoard;
     using T::opBoard;
+
+    GameRules()
+    {}
+
+    GameRules(bool& draw_phase, PlayerState& me, PlayerState& op, HandCards& myHand, BoardCards& myBoard, BoardCards& opBoard)
+        : T{ draw_phase, me, op, myHand, myBoard, opBoard }
+    {}
 
     bool can(const Action& action) const
     {
