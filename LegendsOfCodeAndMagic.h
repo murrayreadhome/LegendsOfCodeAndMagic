@@ -280,7 +280,8 @@ struct GameRules : public T
                 return;
 
             bool blocked = opCard->ward;
-            opCard->ward = false;
+            if (opCard->attack > 0)
+                opCard->ward = false;
 
             if (blocked)
                 return;
@@ -531,6 +532,8 @@ public:
     double score_state(const VisibleState& state)
     {
         double score = (state.me.health - state.op.health);
+        if (state.op.health <= 0)
+            score += 1000;
         for (const Card& card : state.myHand)
             score += card_value(card) * 0.5;
         for (const Card& card : state.myBoard)
@@ -737,10 +740,16 @@ public:
         vector<BestCards> best_cards(m + 1, { bad_score });
 
         HandCards held = in_state.myHand;
-        sort(held.begin(), held.end(), [](const Card& a, const Card& b) { return a.cost < b.cost; });
+        sort(held.begin(), held.end(), [](const Card& a, const Card& b) 
+        { 
+            if (a.cardType != b.cardType)
+                return a.cardType < b.cardType;
+            else
+                return a.cost < b.cost; 
+        });
         for (const Card& card : held)
         {
-            for (int i = 0; i <= m - card.cost; i++)
+            for (int i = m - card.cost; i>=0; i--)
             {
                 const BestCards& from = best_cards[i];
                 if (i > 0 && from.cards.empty())
@@ -749,6 +758,7 @@ public:
                 HandCards new_cards = from.cards;
                 if (new_cards.full())
                     continue;
+
                 new_cards.push_back(card);
                 pair<vector<Action>, double> deployment = deploy_cards(in_state, new_cards);
 
@@ -798,39 +808,42 @@ public:
             change.add(attack.first);
         }
 
-        // instant kill test
-        VisibleState instant_kill = change.state;
-        for (const Card& card : instant_kill.myBoard)
+        // split the remaining attacks
+        double best_score = bad_score;
+        vector<Action> best_attacks;
+        vector<Action> attacks;
+        for (;;)
         {
-            if (card.used)
-                continue;
-            Action face_hit = { Action::ATTACK, card.instanceId, -1 };
-            instant_kill.act(face_hit);
-        }
-
-        if (instant_kill.op.health > 0)
-        {
-            // attack creatures
-            for (;;)
+            // try the current attack actions, then face hit
+            StateChange attack_change{ change.state };
+            attack_change.add(attacks);
+            StateChange post_attack{ attack_change.state };
+            for (const Card& card : attack_change.state.myBoard)
             {
-                pair<vector<Action>, double> attack = find_best_creature_kill(change.state, opCreature);
-                if (attack.first.empty())
-                    break;
-                if (attack.second < 0)
-                    break;
-                for (auto action : attack.first)
-                    change.add(action);
+                if (card.used)
+                    continue;
+                Action face_hit = { Action::ATTACK, card.instanceId, -1 };
+                attack_change.add(face_hit);
             }
-        }
 
-        // attack
-        for (const Card& card : change.state.myBoard)
-        {
-            if (card.used)
-                continue;
-            Action face_hit = { Action::ATTACK, card.instanceId, -1 };
-            change.add(face_hit);
+            // score that
+            double score = score_state(attack_change.state);
+            if (score > best_score)
+            {
+                best_score = score;
+                best_attacks = attack_change.actions;
+            }
+
+            // try to add another creature attack
+            pair<vector<Action>, double> attack = find_best_creature_kill(post_attack.state, opCreature);
+            if (attack.first.empty())
+                break;
+            if (attack.second < 0)
+                break;
+            for (auto action : attack.first)
+                attacks.push_back(action);
         }
+        change.add(best_attacks);
 
         if (change.actions.empty())
             change.actions.push_back({ Action::PASS });
