@@ -1,5 +1,6 @@
 #pragma once
 #include "LegendsOfCodeAndMagic.h"
+#include <random>
 
 struct MultiPlayerState
 {
@@ -26,8 +27,12 @@ public:
     int play(Player& player1, Player& player2);
 
 private:
-    vector<vector<Card>> draft;
+    void draft();
+    void draw(int p);
+
+private:
     int seed;
+    mt19937 re;
 
     bool draw_phase;
     PlayerState player_states[2];
@@ -35,5 +40,6 @@ private:
     BoardCards boards[2];
     Deck decks[2];
     MultiPlayerRules rules[2];
+    Player* players[2];
 };
 

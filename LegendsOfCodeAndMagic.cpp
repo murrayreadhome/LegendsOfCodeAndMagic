@@ -8,8 +8,12 @@ using namespace std;
 
 int main()
 {
-    Player p1, p2;
-    GameController gc(1);
-    gc.play(p1, p2);
+    for (int i = 0; i < 1000; i++)
+    {
+        Player p1, p2;
+        GameController gc(i);
+        int winner = gc.play(p1, p2);
+        cout << winner;
+    }
 	return 0;
 }

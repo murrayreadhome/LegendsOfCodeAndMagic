@@ -119,6 +119,16 @@ struct Card
             }
         }
     }
+
+    void encode(string& abilities) const
+    {
+        abilities.push_back(breakthrough ? 'B' : '-');
+        abilities.push_back(charge ? 'C' : '-');
+        abilities.push_back(drain ? 'D' : '-');
+        abilities.push_back(guard ? 'G' : '-');
+        abilities.push_back(lethal ? 'L' : '-');
+        abilities.push_back(ward ? 'W' : '-');
+    }
 };
 
 struct Action
@@ -256,46 +266,50 @@ struct GameRules : public T
             return &*pcard;
     }
 
-    void act(const Action & action)
+    char* act(const Action & action)
     {
+        if (action.what == Action::PASS || action.what == Action::PICK)
+            return nullptr;
+
+        Card* card;
+        if (action.what == Action::ATTACK)
+            card = get_card(myBoard, action.a);
+        else
+            card = get_card(myHand, action.a);
+        if (!card)
+            return "action source card not found";
+
         switch (action.what)
         {
         case Action::SUMMON:
         {
             if (myBoard.full())
-                return;
-            Card* card = get_card(myHand, action.a);
-            if (!card)
-                return;
+                return "board full";
             card->used = !card->charge;
             myBoard.push_back(*card);
-            me.mana -= card->cost;
-            remove_card(*card, myHand);
         }
         break;
+
         case Action::ATTACK:
         {
-            Card* card = get_card(myBoard, action.a);
-            if (!card)
-                return;
-
             card->used = true;
             if (action.b == -1)
             {
                 op.health -= card->attack;
-                return;
+                op_runes();
+                return nullptr;
             }
 
             Card* opCard = get_card(opBoard, action.b);
             if (!opCard)
-                return;
+                return "opponent attack target not found";
 
             bool blocked = opCard->ward;
             if (opCard->attack > 0)
                 opCard->ward = false;
 
             if (blocked)
-                return;
+                return nullptr;
 
             card->defense -= opCard->attack;
             int damage = min(card->attack, opCard->defense);
@@ -304,7 +318,10 @@ struct GameRules : public T
             if (card->lethal)
                 opCard->defense = 0;
             if (card->breakthrough)
+            {
                 op.health -= card->attack - damage;
+                op_runes();
+            }
             if (card->drain)
                 me.health += damage;
 
@@ -315,13 +332,9 @@ struct GameRules : public T
                 remove_card(*opCard, opBoard);
         }
         break;
+
         case Action::USE:
         {
-            Card* card = get_card(myHand, action.a);
-            if (!card)
-                return;
-            me.mana -= card->cost;
-            
             if (action.b == -1)
             {
             }
@@ -329,7 +342,7 @@ struct GameRules : public T
             {
                 Card* opCard = get_card(opBoard, action.b);
                 if (!opCard)
-                    return;
+                    return "opponent use target not found";
                 red_effect(*card, *opCard);
                 if (opCard->defense <= 0)
                     remove_card(*opCard, opBoard);
@@ -338,19 +351,50 @@ struct GameRules : public T
             {
                 Card* myCard = get_card(myBoard, action.b);
                 if (!myCard)
-                    return;
+                    return "my use target not found";
                 green_effect(*card, *myCard);
             }
-
-            me.health += card->myHealthChange;
-            op.health += card->opponentHealthChange;
-            remove_card(*card, myHand);
         }
         break;
-        case Action::PICK:
-        case Action::PASS:
+
         default:
             break;
+        }
+
+        if (action.what == Action::SUMMON || action.what == Action::USE)
+        {
+            me.health += card->myHealthChange;
+            op.health += card->opponentHealthChange;
+            op_runes();
+            me.mana -= card->cost;
+            me.draw += card->cardDraw;
+            remove_card(*card, myHand);
+        }
+
+        return nullptr;
+    }
+
+    void op_runes()
+    {
+        while (op.health < op.rune)
+        {
+            op.rune -= 5;
+            op.draw += 1;
+        }
+    }
+
+    void draw_runes()
+    {
+        int deck = me.deck;
+        for (int d = 0; d < me.draw; d++)
+        {
+            if (deck <= 0)
+            {
+                me.health = min(me.health, me.rune);
+                me.rune -= 5;
+                return;
+            }
+            deck--;
         }
     }
 
@@ -388,6 +432,12 @@ inline istream& operator>>(istream& in, PlayerState& player)
     return in;
 }
 
+inline ostream& operator<<(ostream& out, const PlayerState& player)
+{
+    out << player.health << " " << player.mana << " " << player.deck << " " << player.rune << " " << player.draw << endl;
+    return out;
+}
+
 inline istream& operator>>(istream& in, Card& card)
 {
     string abilities;
@@ -396,6 +446,14 @@ inline istream& operator>>(istream& in, Card& card)
     card.used = false;
     in.ignore();
     return in;
+}
+
+inline ostream& operator<<(ostream& out, const Card& card)
+{
+    string abilities;
+    card.encode(abilities);
+    out << card.number << " " << card.instanceId << " " << card.location << " " << card.cardType << " " << card.cost << " " << card.attack << " " << card.defense << " " << abilities << " " << card.myHealthChange << " " << card.opponentHealthChange << " " << card.cardDraw;
+    return out;
 }
 
 inline istream& operator>>(istream& in, VisibleState& state)
@@ -435,6 +493,23 @@ inline istream& operator>>(istream& in, VisibleState& state)
     state.draw_phase = state.me.mana == 0;
 
     return in;
+}
+
+inline ostream& operator<<(ostream& out, const VisibleState& state)
+{
+    out << state.me;
+    out << state.op;
+
+    vector<Card> cards;
+    cards.insert(cards.end(), state.opBoard.begin(), state.opBoard.end());
+    cards.insert(cards.end(), state.myHand.begin(), state.myHand.end());
+    cards.insert(cards.end(), state.myBoard.begin(), state.myBoard.end());
+
+    out << cards.size() << endl;
+    for (Card card : cards)
+        out << card << endl;
+
+    return out;
 }
 
 inline ostream& operator<<(ostream& out, const Action& action)
