@@ -77,11 +77,6 @@ struct Card
     int opponentHealthChange;
     int cardDraw;
 
-    int cost_class() const
-    {
-        return min(7, cost);
-    }
-
     bool breakthrough = false;
     bool charge = false;
     bool guard = false;
@@ -566,28 +561,43 @@ struct StateChange
 
 const double bad_score = -1e9;
 
+struct IntParams
+{
+    int curve[13] = { 0, 5, 4, 3, 3, 3, 0, 0 };
+};
+
+struct DoubleParams
+{
+};
+
+struct Params
+{
+    IntParams i;
+    DoubleParams d;
+};
+
 class Player
 {
 public:
     Deck deck;
     vector<int> cost_counts;
-    const vector<int> wanted = { 0, 5, 4, 3, 3, 3, 0, 0 };
+    const Params v;
 
-    Player()
-        : cost_counts(8, 0)
+    Player(Params params = Params())
+        : cost_counts(13, 0), v(params)
     {}
 
     Action draftAction(const VisibleState& state)
     {
         int required = 0;
-        for (int i = 0; i < 8; i++)
-            required += max(0, wanted[i] - cost_counts[i]);
+        for (int i = 0; i < 13; i++)
+            required += max(0, v.i.curve[i] - cost_counts[i]);
         double flexibility = max(0.0001, 1.0 - 1.0 * required / (30 - deck.size()));
 
         auto best_card = find_best(state.myHand.begin(), state.myHand.end(), [&](const Card& card) 
         {
             double value = 1.0 * card.attack * card.defense / (card.cost + 1);
-            int wanted_value = wanted[card.cost_class()] - cost_counts[card.cost_class()];
+            int wanted_value = v.i.curve[card.cost] - cost_counts[card.cost];
             if (wanted_value > 0)
                 value += wanted_value;
             else
@@ -596,7 +606,7 @@ public:
         }).first;
 
         deck.push_back(*best_card);
-        cost_counts[best_card->cost_class()]++;
+        cost_counts[best_card->cost]++;
         return Action{ Action::PICK, int(best_card - state.myHand.begin()) };
     }
 
@@ -946,9 +956,28 @@ public:
     }
 };
 
+const Params current_best_params =
+{ {
+    3,
+    5,
+    5,
+    3,
+    3,
+    2,
+    -1,
+    1,
+    0,
+    -4,
+    -3,
+    -2,
+    0,
+},
+{
+} };
+
 inline void codingame_loop()
 {
-    Player player;
+    Player player(current_best_params);
 
     // game loop
     while (1) {
