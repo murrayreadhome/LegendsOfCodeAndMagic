@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <type_traits>
+#include <cmath>
 
 using namespace std;
 
@@ -568,6 +569,49 @@ struct IntParams
 
 struct DoubleParams
 {
+    double attack_m = 1;
+    double defense_m = 1;
+    double mult_m = 1;
+    double cost_a = 1;
+    double cost_pow = -1;
+    double flex_min = 0.0001;
+    double flex_pen = 1;
+    double attr_b = 0;
+
+    double attr_c = 0;
+    double attr_d = 0;
+    double attr_g = 0;
+    double attr_l = 0;
+    double attr_w = 0;
+    double attr_u = 0;
+    double creature = 0;
+    double attr_gb = 0;
+
+    double attr_gd = 0;
+    double attr_gl = 0;
+    double attr_gw = 0;
+    double health = 1;
+    double my_hand = 0.5;
+    double my_board = 1;
+    double op_board = 1;
+    double num_board = 0;
+
+    double attr_op_b = 0;
+    double attr_op_c = 0;
+    double attr_op_d = 0;
+    double attr_op_g = 0;
+    double attr_op_l = 0;
+    double attr_op_w = 0;
+    double draft_attack_m = 1;
+    double draft_defense_m = 1;
+
+    double draft_mult_m = 1;
+    double draft_attr_b = 0;
+    double draft_attr_c = 0;
+    double draft_attr_d = 0;
+    double draft_attr_g = 0;
+    double draft_attr_l = 0;
+    double draft_attr_w = 0;
 };
 
 struct Params
@@ -587,16 +631,32 @@ public:
         : cost_counts(13, 0), v(params)
     {}
 
+    double draft_card_value(const Card& card)
+    {
+        double value = v.d.draft_attack_m * card.attack;
+        value += v.d.draft_defense_m * card.defense;
+        value += v.d.draft_mult_m * card.attack * card.defense;
+        if (card.breakthrough) value += v.d.draft_attr_b;
+        if (card.charge) value += v.d.draft_attr_c;
+        if (card.drain) value += v.d.draft_attr_d;
+        if (card.guard) value += v.d.draft_attr_g;
+        if (card.lethal) value += v.d.draft_attr_l;
+        if (card.ward) value += v.d.draft_attr_w;
+        if (card.cardType == Creature) value += v.d.creature;
+        value *= pow(max(0.1, card.cost + v.d.cost_a), v.d.cost_pow);
+        return value;
+    }
+
     Action draftAction(const VisibleState& state)
     {
         int required = 0;
         for (int i = 0; i < 13; i++)
             required += max(0, v.i.curve[i] - cost_counts[i]);
-        double flexibility = max(0.0001, 1.0 - 1.0 * required / (30 - deck.size()));
+        double flexibility = max(v.d.flex_min, 1.0 - v.d.flex_pen * required / (30 - deck.size()));
 
         auto best_card = find_best(state.myHand.begin(), state.myHand.end(), [&](const Card& card) 
         {
-            double value = 1.0 * card.attack * card.defense / (card.cost + 1);
+            double value = draft_card_value(card);
             int wanted_value = v.i.curve[card.cost] - cost_counts[card.cost];
             if (wanted_value > 0)
                 value += wanted_value;
@@ -610,32 +670,49 @@ public:
         return Action{ Action::PICK, int(best_card - state.myHand.begin()) };
     }
 
-    double card_value(const Card& c)
+    double battle_card_value(const Card& card, bool opCard = false)
     {
-        double d = max(1, c.defense);
-        if (c.guard)
-            d *= 2;
-        double a = max(1, c.attack);
-        if (c.lethal)
-            a = max(a, 5.0);
-        if (c.drain)
-            a *= 2;
-        if (c.breakthrough)
-            a *= 2;
-        return d * a;
+        double value = v.d.attack_m * card.attack;
+        value += v.d.defense_m * card.defense;
+        value += v.d.mult_m * card.attack * card.defense;
+        if (card.breakthrough) value += v.d.attr_b;
+        if (card.charge) value += v.d.attr_c;
+        if (card.drain) value += v.d.attr_d;
+        if (card.guard)
+        {
+            value += v.d.attr_g;
+            if (card.breakthrough) value += v.d.attr_gb;
+            if (card.drain) value += v.d.attr_gd;
+            if (card.lethal) value += v.d.attr_gl;
+            if (card.ward) value += v.d.attr_gw;
+        }
+        if (card.lethal) value += v.d.attr_l;
+        if (card.ward) value += v.d.attr_w;
+        if (card.used) value += v.d.attr_u;
+        if (opCard)
+        {
+            if (card.breakthrough) value += v.d.attr_op_b;
+            if (card.charge) value += v.d.attr_op_c;
+            if (card.drain) value += v.d.attr_op_d;
+            if (card.guard) value += v.d.attr_op_g;
+            if (card.lethal) value += v.d.attr_op_l;
+            if (card.ward) value += v.d.attr_op_w;
+        }
+        return value;
     }
 
     double score_state(const VisibleState& state)
     {
-        double score = (state.me.health - state.op.health);
+        double score = v.d.health * (state.me.health - state.op.health);
         if (state.op.health <= 0)
             score += 1000;
         for (const Card& card : state.myHand)
-            score += card_value(card) * 0.5;
+            score += battle_card_value(card) * v.d.my_hand;
         for (const Card& card : state.myBoard)
-            score += card_value(card);
+            score += battle_card_value(card) * v.d.my_board;
         for (const Card& card : state.opBoard)
-            score -= card_value(card);
+            score -= battle_card_value(card, true) * v.d.op_board;
+        score += v.d.num_board * (state.myBoard.size() - state.opBoard.size());
         return score;
     }
 
@@ -958,21 +1035,15 @@ public:
 
 const Params current_best_params =
 { {
-    3,
-    5,
-    5,
-    3,
-    3,
-    2,
-    -1,
-    1,
-    0,
-    -4,
-    -3,
-    -2,
-    0,
+2, 9, 11, 9, 7, 4, 3, -2,
+-3, 0, 4, 5, 2,
 },
 {
+7.73817, 2.91513, 0.42475, 4.77937, -0.826599, 0.691071, 0.729992, -3.01847,
+-5.33083, 4.26642, 4.8868, 2.18347, 1.09028, 2.01672, 1.89978, 3.09518,
+1.35242, 4.52741, 3.01027, 0.144965, -0.440247, 4.34497, 5.36517, 0,
+-4.13682, 0.775486, -2.53257, 0.964975, -2.90551, -3.59518, -2.44149, -1.07429,
+2.50147, 0.327159, -2.1511, -2.62134, 4.22959, 1.87049, -2.11927,
 } };
 
 inline void codingame_loop()
