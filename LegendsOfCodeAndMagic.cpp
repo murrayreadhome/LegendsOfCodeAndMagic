@@ -4,13 +4,15 @@
 #include "LegendsOfCodeAndMagic.h"
 #include "GameController.h"
 #include <chrono>
+#include <conio.h>
+#include <map>
 
 using namespace std;
 
 double eval_params(const Params& a, const Params& b)
 {
     int a_wins = 0;
-    int seed = int(std::chrono::duration_cast<std::chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count());
+    static int seed = int(std::chrono::duration_cast<std::chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count());
 
     for (int i = 0; i < 500; i++)
     {
@@ -71,55 +73,79 @@ void improve_params(Params p, Params vs)
     mt19937 re(seed);
     double bestSc = eval_params(p, vs);
     size_t n = 1;
-    double ltBestSc = bestSc;
-    size_t ltN = n;
-    Params ltBest = p;
-    bool reverted = true;
-    for (;;)
+    map<size_t, pair<Params, double>> ltBest;
+    ltBest[1] = { p, bestSc };
+    size_t last_revert = 1;
+    double last_revert_sc = bestSc;
+
+    while (!_kbhit())
     {
         Params q = p;
         mutate_params(q, re);
         double scq = 0, tscq = 0;
+        size_t qn = 0;
         for (size_t i = 0; i < n; i++)
         {
             tscq += eval_params(q, vs);
-            scq = tscq / (i+1);
+            qn++;
+            scq = tscq / qn;
             if (scq < bestSc)
                 break;
         }
         double scp = eval_params(p, vs);
         bestSc = (bestSc * n + scp) / (n + 1);
         n++;
-        cerr << scq << " " << bestSc << endl;
-        if (scq >= bestSc)
+        cerr << scq << " vs " << bestSc << " / " << n << endl;
+        if (scq >= bestSc || uniform_int_distribution<int>(0, 20)(re) == 0)
         {
-            reverted = false;
+            last_revert = 0;
             p = q;
-            n = 1;
-            cout << scq << endl;
+            n = qn;
             if (scq > bestSc)
+            {
                 cout << q;
-            bestSc = scq;
+                bestSc = scq;
+            }
         }
-        if (bestSc > ltBestSc && n > 9)
+
+        if (last_revert != 0)
         {
-            ltBestSc = bestSc;
-            ltN = n;
-            ltBest = p;
+//            cerr << "update " << last_revert << endl;
+            ltBest[last_revert].second = bestSc;
         }
-        else if (n > ltN && reverted)
+
+        if (n != 0 && (n & (n - 1)) == 0)
         {
-            ltBestSc = bestSc;
+//            cout << "check best for " << n << endl;
+            if (bestSc > ltBest[n].second)
+            {
+                ltBest[n] = { p, bestSc };
+            }
         }
-        else if (bestSc < ltBestSc && uniform_int_distribution<int>(0, 10)(re) == 0)
+
+        if (bestSc + 0.05 < last_revert_sc || n > 32 || uniform_int_distribution<size_t>(0, n*2)(re) == 0)
         {
-            reverted = true;
-            p = ltBest;
-            n = ltN;
-            bestSc = ltBestSc;
-            cout << "revert to lt best " << bestSc << " / " << n << endl;
-            cout << p;
+            size_t r = uniform_int_distribution<size_t>(0, ltBest.size() - 1)(re);
+            size_t rn = 1ull << r;
+//            cout << "check update" << ltBest.size() << " " << r << " " << rn << endl;
+            last_revert = rn;
+            if (bestSc < ltBest[rn].second)
+            {
+                p = ltBest[rn].first;
+                n = rn;
+                bestSc = ltBest[rn].second;
+                last_revert_sc = bestSc;
+                ltBest[rn].second -= 0.001;
+                cout << "revert to lt best " << bestSc << " / " << rn << endl;
+                cout << p;
+            }
         }
+    }
+
+    for (const auto& lt : ltBest)
+    {
+        cout << "n=" << lt.first << " score=" << lt.second.second << endl;
+        cout << lt.second.first;
     }
 }
 
@@ -153,15 +179,15 @@ int main()
 
     Params current =
     { {
-3, 4, 4, 5, 3, 3, -1, 1,
--1, -4, -4, 0, -5,
+4, 4, 4, 5, 3, 3, -3, -1,
+-1, -3, -4, -1, -6,
 },
 {
-1.47362, 1.24688, 0.0494033, 0.726908, -1.03512, 1.07404, 4.52013, -0.632891,
--0.812973, -0.928142, 0.675997, 1.67538, 2.31899, -0.503139, -0.655207, 3.98904,
-2.02604, -1.12797, 1.03306, 0.0985854, 0.185162, 0.972665, 1.02857, 0,
-1.37501, 2.19595, 2.36287, -1.14475, -0.21112, -1.72412, 1.65212, 1.36013,
-0.674527, -2.89216, -3.29959, -1.26968, -2.4993, 2.27012, -1.56656,
+1.83846, 1.41196, 0.0494033, 0.726908, -1.03512, 1.07404, 4.62533, -0.8087,
+-1.03991, 0.627651, 1.10518, 1.67538, 2.31899, -0.503139, -0.655207, 3.98904,
+1.5107, -0.913315, 1.03306, 0.0985854, -0.0674146, 0.972665, 1.02857, 0,
+1.89875, 2.77945, 2.36287, -1.87586, 0.0677042, -1.64044, 1.65212, 1.20588,
+0.674527, -2.55321, -3.1398, -0.412947, -1.79981, 4.72006, -2.28103,
 } };
     improve_params(current, last);
 	return 0;
