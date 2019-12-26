@@ -9,12 +9,12 @@
 
 using namespace std;
 
-double eval_params(const Params& a, const Params& b)
+double eval_params(const Params& a, const Params& b, int n=1000)
 {
     int a_wins = 0;
     static int seed = int(std::chrono::duration_cast<std::chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count());
 
-    for (int i = 0; i < 500; i++)
+    for (int i = 0; i < n/2; i++)
     {
         for (int o = 0; o < 2; o++)
         {
@@ -27,7 +27,7 @@ double eval_params(const Params& a, const Params& b)
         }
     }
 
-    return a_wins / 1000.0;
+    return double(a_wins) / n;
 }
 
 void mutate_params(Params& p, mt19937& re)
@@ -155,6 +155,25 @@ void improve_params(Params p, Params vs)
     }
 }
 
+void tournament(const vector<Params>& params)
+{
+    size_t n = params.size();
+    vector<double> scores(n, 0);
+    for (size_t i = 0; i < n; i++)
+    {
+        for (size_t j = i + 1; j < n; j++)
+        {
+            double i_wins = eval_params(params[i], params[j], 10000);
+            cout << i << " vs " << j << " " << i_wins << endl;
+            scores[i] += i_wins;
+            scores[j] += 1.0 - i_wins;
+        }
+    }
+
+    for (size_t i = 0; i < n; i++)
+        cout << i << " " << scores[i]/(n-1) << endl;
+}
+
 int main()
 {
     Params gold32 =
@@ -226,6 +245,25 @@ int main()
     3.29726, 9.94, -2.68016, 1.65906, 0.378562, 2.34008, 0.0208961, -1.55224,
     0.236862,
     } };
-    improve_params(current, gold56);
+
+    Params current = 
+    { {
+    0, 4, 4, 3, 3, 3, 0, 0,
+    -2, 0, 0, -1, 0,
+    },
+    {
+    1.38956, 1.87169, 1, 1, -1.17939, 6.60737e-05, 1, 0,
+    0, 0, 0.445612, 0, 0, 0, 0.433479, 0,
+    0, 0, 0, 1, 0.5, 1, 2.49716, 0,
+    0, 0, 0, 0, 0, 0, 1, 1,
+    1.89977, 0, 0, 0, 0.088106, 0, 0.482735, 0,
+    0, 0, 0, 0.0141146, 0, 0, 0, 1.05411,
+    1.83387, 1, 0, 0.420305, 0, 0, 0, 0,
+    -7,
+    } };
+
+    improve_params(current, gold31);
+
+    //tournament({ gold32, gold57, gold56, gold31 });
 	return 0;
 }
