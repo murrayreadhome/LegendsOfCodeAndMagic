@@ -85,6 +85,7 @@ struct Card
     bool lethal = false;
     bool ward = false;
     bool used = false;
+    bool new_this_turn = false;
 
     void decode(const string& abilities)
     {
@@ -170,6 +171,12 @@ struct GameRules : public T
     GameRules(bool& draw_phase, PlayerState& me, PlayerState& op, HandCards& myHand, BoardCards& myBoard, BoardCards& opBoard)
         : T{ draw_phase, me, op, myHand, myBoard, opBoard }
     {}
+
+    void start_of_turn()
+    {
+        for (Card& card : myBoard)
+            card.new_this_turn = false;
+    }
 
     bool can(const Action& action) const
     {
@@ -282,6 +289,7 @@ struct GameRules : public T
             if (myBoard.full())
                 return "board full";
             card->used = !card->charge;
+            card->new_this_turn = true;
             myBoard.push_back(*card);
         }
         break;
@@ -289,6 +297,7 @@ struct GameRules : public T
         case Action::ATTACK:
         {
             card->used = true;
+            card->new_this_turn = false;
             if (action.b == -1)
             {
                 op.health -= card->attack;
@@ -301,7 +310,7 @@ struct GameRules : public T
                 return "opponent attack target not found";
 
             bool blocked = opCard->ward;
-            if (opCard->attack > 0)
+            if (card->attack > 0)
                 opCard->ward = false;
 
             if (blocked)
@@ -399,7 +408,12 @@ struct GameRules : public T
         card.attack += effect.attack;
         card.defense += effect.defense;
         card.breakthrough = card.breakthrough || effect.breakthrough;
-        card.charge = card.charge || effect.charge;
+        if (effect.charge)
+        {
+            card.charge = effect.charge;
+            if (card.new_this_turn)
+                card.used = false;
+        }
         card.drain = card.drain || effect.drain;
         card.guard = card.guard || effect.guard;
         card.lethal = card.lethal || effect.lethal;
@@ -408,14 +422,22 @@ struct GameRules : public T
 
     void red_effect(const Card& effect, Card& card)
     {
-        card.attack += effect.attack;
-        card.defense += effect.defense;
         card.breakthrough = card.breakthrough && !effect.breakthrough;
         card.charge = card.charge && !effect.charge;
         card.drain = card.drain && !effect.drain;
         card.guard = card.guard && !effect.guard;
         card.lethal = card.lethal && !effect.lethal;
         card.ward = card.ward && !effect.ward;
+        if (card.ward)
+        {
+            if (card.attack != 0 || card.defense != 0)
+                card.ward = false;
+        }
+        else
+        {
+            card.attack += effect.attack;
+            card.defense += effect.defense;
+        }
     }
 };
 
@@ -612,6 +634,28 @@ struct DoubleParams
     double draft_attr_g = 0;
     double draft_attr_l = 0;
     double draft_attr_w = 0;
+    double draw_30 = 0;
+
+    double draw_0 = 0;
+    double draft_item_b = 0;
+    double draft_item_c = 0;
+    double draft_item_d = 0;
+    double draft_item_g = 0;
+    double draft_item_l = 0;
+    double draft_item_w = 0;
+    double draft_add_my_health = 1;
+
+    double draft_sub_op_health = 1;
+    double draft_draw = 1;
+    double draft_item_attack_m = 0;
+    double draft_item_defense_m = 0;
+    double draft_item_mult_m = 0;
+    double itemRed = 0;
+    double itemGreen = 0;
+    double itemBlue = 0;
+
+    double maxDamage = -7;
+
 };
 
 struct Params
@@ -636,13 +680,34 @@ public:
         double value = v.d.draft_attack_m * card.attack;
         value += v.d.draft_defense_m * card.defense;
         value += v.d.draft_mult_m * card.attack * card.defense;
-        if (card.breakthrough) value += v.d.draft_attr_b;
-        if (card.charge) value += v.d.draft_attr_c;
-        if (card.drain) value += v.d.draft_attr_d;
-        if (card.guard) value += v.d.draft_attr_g;
-        if (card.lethal) value += v.d.draft_attr_l;
-        if (card.ward) value += v.d.draft_attr_w;
-        if (card.cardType == Creature) value += v.d.creature;
+        if (card.cardType == Creature)
+        {
+            value += v.d.creature;
+            if (card.breakthrough) value += v.d.draft_attr_b;
+            if (card.charge) value += v.d.draft_attr_c;
+            if (card.drain) value += v.d.draft_attr_d;
+            if (card.guard) value += v.d.draft_attr_g;
+            if (card.lethal) value += v.d.draft_attr_l;
+            if (card.ward) value += v.d.draft_attr_w;
+        }
+        else
+        {
+            value += v.d.draft_item_attack_m * card.attack;
+            value += v.d.draft_item_defense_m * max(double(card.defense), v.d.maxDamage);
+            value += v.d.draft_item_mult_m * card.attack * card.defense;
+            if (card.breakthrough) value += v.d.draft_item_b;
+            if (card.charge) value += v.d.draft_item_c;
+            if (card.drain) value += v.d.draft_item_d;
+            if (card.guard) value += v.d.draft_item_g;
+            if (card.lethal) value += v.d.draft_item_l;
+            if (card.ward) value += v.d.draft_item_w;
+            if (card.cardType == Red) value += v.d.itemRed;
+            if (card.cardType == Green) value += v.d.itemGreen;
+            if (card.cardType == Blue) value += v.d.itemBlue;
+        }
+        value += v.d.draft_add_my_health * card.myHealthChange;
+        value += v.d.draft_sub_op_health * card.opponentHealthChange;
+        value += v.d.draft_draw * card.cardDraw;
         value *= pow(max(0.1, card.cost + v.d.cost_a), v.d.cost_pow);
         return value;
     }
@@ -705,7 +770,7 @@ public:
     {
         double score = v.d.health * (state.me.health - state.op.health);
         if (state.op.health <= 0)
-            score += 1000;
+            score += 1e99;
         for (const Card& card : state.myHand)
             score += battle_card_value(card) * v.d.my_hand;
         for (const Card& card : state.myBoard)
@@ -713,6 +778,7 @@ public:
         for (const Card& card : state.opBoard)
             score -= battle_card_value(card, true) * v.d.op_board;
         score += v.d.num_board * (state.myBoard.size() - state.opBoard.size());
+        score += ((v.d.draw_30 * state.me.draw * state.me.deck) + (v.d.draw_0 * state.me.draw * (30 - state.me.deck))) / 30;
         return score;
     }
 
@@ -1035,15 +1101,18 @@ public:
 
 const Params current_best_params =
 { {
-2, 9, 11, 9, 7, 4, 3, -2,
--3, 0, 4, 5, 2,
+7, 6, 12, 10, 10, 8, 6, 4,
+5, -10, -10, 5, -4,
 },
 {
-7.73817, 2.91513, 0.42475, 4.77937, -0.826599, 0.691071, 0.729992, -3.01847,
--5.33083, 4.26642, 4.8868, 2.18347, 1.09028, 2.01672, 1.89978, 3.09518,
-1.35242, 4.52741, 3.01027, 0.144965, -0.440247, 4.34497, 5.36517, 0,
--4.13682, 0.775486, -2.53257, 0.964975, -2.90551, -3.59518, -2.44149, -1.07429,
-2.50147, 0.327159, -2.1511, -2.62134, 4.22959, 1.87049, -2.11927,
+7.61404, 6.73621, 0.00703978, -0.605314, -1.18427, -25.1146, 0.726403, -0.719495,
+4.99645, 0.130773, 0.244524, 0.974274, 0.0252914, -0.709927, 0.97464, 0.737504,
+-1.5623, -5.09058, -1.53143, 0.224828, -0.0458732, 1.22855, 1.57064, 0,
+2.83786, 4.61971, 0.2521, 2.94954, 15.5086, 3.53728, 0.690261, -1.44891,
+2.04015, -0.983451, -1.55338, 2.19156, 3.15911, 9.07261, -0.884952, 0.727166,
+1.26622, -62.8933, -6.71968, -0.970392, -9.02535, -0.597951, 1.06167, -1.37738,
+3.29726, 9.94, -2.68016, 1.65906, 0.378562, 2.34008, 0.0208961, -1.55224,
+0.236862,
 } };
 
 inline void codingame_loop()
@@ -1054,6 +1123,7 @@ inline void codingame_loop()
     while (1) {
         VisibleState vs;
         cin >> vs;
+        vs.start_of_turn();
 
         vector<Action> actions;
         if (vs.draw_phase)

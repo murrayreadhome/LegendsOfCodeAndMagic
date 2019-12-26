@@ -125,6 +125,7 @@ void GameController::draft()
         {
             hands[p] = cards;
 //            cerr << rules[p].visible_state();
+            rules[p].start_of_turn();
             Action take = players[p]->draftAction(rules[p].visible_state());
             if (rules[p].can(take) && take.what == Action::PICK)
                 decks[p].push_back(cards[take.a]);
