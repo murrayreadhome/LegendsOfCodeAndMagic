@@ -12,12 +12,7 @@ namespace
 
 GameController::GameController(int seed)
     :
-    seed(seed),
-    rules
-    {
-        {draw_phase, player_states[0], player_states[1], hands[0], boards[0], boards[1]},
-        {draw_phase, player_states[1], player_states[0], hands[1], boards[1], boards[0]}
-    }
+    seed(seed)
 {
 }
 
