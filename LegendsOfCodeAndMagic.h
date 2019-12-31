@@ -672,15 +672,15 @@ struct GameRules : public T
         card.drain = card.drain && !effect.drain;
         card.guard = card.guard && !effect.guard;
         card.lethal = card.lethal && !effect.lethal;
+        card.attack += effect.attack;
         card.ward = card.ward && !effect.ward;
         if (card.ward)
         {
-            if (card.attack != 0 || card.defense != 0)
+            if (card.defense != 0)
                 card.ward = false;
         }
         else
         {
-            card.attack += effect.attack;
             card.defense += effect.defense;
         }
     }
@@ -927,6 +927,8 @@ struct DoubleParams
     double card_m_d = 0;
     double item_m_a = 0;
     double item_m_d = 0;
+    double attr_lw = 0;
+    double draft_attr_lw = 0;
 };
 
 struct Params
@@ -976,6 +978,7 @@ public:
             if (card.cardType == Green) value += v.d.itemGreen;
             if (card.cardType == Blue) value += v.d.itemBlue;
         }
+        if (card.ward && card.lethal) value += v.d.draft_attr_lw;
         value += v.d.draft_add_my_health * card.myHealthChange;
         value += v.d.draft_sub_op_health * card.opponentHealthChange;
         value += v.d.draft_draw * card.cardDraw;
@@ -1025,6 +1028,7 @@ public:
         if (card.lethal) value += v.d.attr_l;
         if (card.ward) value += v.d.attr_w;
         if (card.used) value += v.d.attr_u;
+        if (card.ward && card.lethal) value += v.d.attr_lw;
         if (opCard)
         {
             if (card.breakthrough) value += v.d.attr_op_b;
@@ -1615,18 +1619,18 @@ inline string boards_diff(const BoardCards& a, const BoardCards& b, string who)
 
 const Params current_best_params =
 { {
-0, 2, 4, 5, 2, 1, -5, -7,
--5, -11, -8, -7, -7,
+-5, 3, 5, 4, 2, -1, -13, 1,
+-5, -7, 5, -12, -4,
 },
 {
-2.80787, 1.9218, 0.261229, 0.725032, -1.28739, 0.830066, 0.567213, -0.414187,
-1.45776, -0.272006, 0.575817, -0.25395, 2.73163, -0.313109, 3.85514, 0.872998,
-1.56796, 1.64741, 1.14193, -0.157035, 0.0580965, 1.1822, 1.53493, 0,
-0.638911, -1.02047, -0.346689, -0.762542, 19.8183, -1.02183, 1.14937, 0.560557,
-2.94441, -4.74371, -3.15498, -0.573178, 0.0780187, -0.0281649, 3.60422, -0.00324518,
-3.98431, -1.02113, -1.79464, 1.22999, 0.568018, 1.63991, -0.468817, 0.186743,
-6.42454, 14.9243, -0.0170047, 6.03354, -2.36409, -2.46361, -0.550072, -0.497079,
-25.1896, 0, 0.0723614, -0.216477, -0.0144239,
+4.73095, 2.68304, 0.236421, 0.717338, -1.03961, 0.883133, 0.0994785, 1.18619,
+2.16072, 2.70415, 0.693665, 17.6778, 11.3714, -0.958515, -2.40779, 3.2706,
+-0.790726, -2.26678, -1.96172, 0.152949, 0.0641518, 2.30234, 2.53189, 0,
+-1.63735, 0.337842, -0.468753, -0.299272, -1.83165, -1.70411, 4.95859, 1.15357,
+0.352331, -1.48017, 0.215066, -3.63714, -0.73088, 107.654, 12.4766, 2.23271,
+-0.0201277, 2.25825, -3.23735, -0.690174, -2.29374, -3.93088, -1.13206, -0.90098,
+4.96106, 8.88133, -3.21313, 2.45326, -0.213814, 0.12347, -6.4973, 5.5528,
+5.10403, 0.357561, 2.78479, -0.42423, 0.751112, 0.499989, -4.67846,
 } };
 
 inline void codingame_loop()
