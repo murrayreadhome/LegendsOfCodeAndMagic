@@ -5,50 +5,9 @@
 class OldPlayer1 : public Player
 {
 public:
-    Deck deck;
-    vector<int> cost_counts;
-    const Params v;
-
     OldPlayer1(Params params = Params())
-        : cost_counts(13, 0), v(params)
+        : Player(params)
     {}
-
-    double draft_card_value(const Card& card)
-    {
-        double value = v.d.draft_attack_m * abs(card.attack);
-        value += v.d.draft_defense_m * abs(card.defense);
-        value += v.d.draft_mult_m * (abs(card.attack) + v.d.card_m_a) * (abs(card.defense) + v.d.card_m_d);
-        if (card.cardType == Creature)
-        {
-            value += v.d.creature;
-            if (card.breakthrough) value += v.d.draft_attr_b;
-            if (card.charge) value += v.d.draft_attr_c;
-            if (card.drain) value += v.d.draft_attr_d;
-            if (card.guard) value += v.d.draft_attr_g;
-            if (card.lethal) value += v.d.draft_attr_l;
-            if (card.ward) value += v.d.draft_attr_w;
-        }
-        else
-        {
-            value += v.d.draft_item_attack_m * abs(card.attack);
-            value += v.d.draft_item_defense_m * min(double(abs(card.defense)), v.d.maxDamage);
-            value += v.d.draft_item_mult_m * (abs(card.attack) + v.d.item_m_a) * (abs(card.defense) + v.d.item_m_d);
-            if (card.breakthrough) value += v.d.draft_item_b;
-            if (card.charge) value += v.d.draft_item_c;
-            if (card.drain) value += v.d.draft_item_d;
-            if (card.guard) value += v.d.draft_item_g;
-            if (card.lethal) value += v.d.draft_item_l;
-            if (card.ward) value += v.d.draft_item_w;
-            if (card.cardType == Red) value += v.d.itemRed;
-            if (card.cardType == Green) value += v.d.itemGreen;
-            if (card.cardType == Blue) value += v.d.itemBlue;
-        }
-        value += v.d.draft_add_my_health * card.myHealthChange;
-        value += v.d.draft_sub_op_health * card.opponentHealthChange;
-        value += v.d.draft_draw * card.cardDraw;
-        value *= pow(max(0.1, card.cost + v.d.cost_a), v.d.cost_pow);
-        return value;
-    }
 
     Action draftAction(const VisibleState& state)
     {
@@ -71,37 +30,6 @@ public:
         deck.push_back(*best_card);
         cost_counts[best_card->cost]++;
         return Action{ Action::PICK, int(best_card - state.myHand.begin()) };
-    }
-
-    double battle_card_value(const Card& card, bool opCard = false)
-    {
-        double value = v.d.attack_m * abs(card.attack);
-        value += v.d.defense_m * abs(card.defense);
-        value += v.d.mult_m * abs(card.attack) * abs(card.defense);
-        if (card.breakthrough) value += v.d.attr_b;
-        if (card.charge) value += v.d.attr_c;
-        if (card.drain) value += v.d.attr_d;
-        if (card.guard)
-        {
-            value += v.d.attr_g;
-            if (card.breakthrough) value += v.d.attr_gb;
-            if (card.drain) value += v.d.attr_gd;
-            if (card.lethal) value += v.d.attr_gl;
-            if (card.ward) value += v.d.attr_gw;
-        }
-        if (card.lethal) value += v.d.attr_l;
-        if (card.ward) value += v.d.attr_w;
-        if (card.used) value += v.d.attr_u;
-        if (opCard)
-        {
-            if (card.breakthrough) value += v.d.attr_op_b;
-            if (card.charge) value += v.d.attr_op_c;
-            if (card.drain) value += v.d.attr_op_d;
-            if (card.guard) value += v.d.attr_op_g;
-            if (card.lethal) value += v.d.attr_op_l;
-            if (card.ward) value += v.d.attr_op_w;
-        }
-        return value;
     }
 
     double score_state(const VisibleState& state)
