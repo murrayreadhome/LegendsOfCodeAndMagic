@@ -1535,14 +1535,6 @@ public:
         BoardCards opGuard;
         BoardCards opCreature;
 
-        for (const Card& card : in_state.opBoard)
-        {
-            if (card.guard)
-                opGuard.push_back(card);
-            else
-                opCreature.push_back(card);
-        }
-
         // find ways to spend mana
         vector<vector<Action>> spends = find_best_spends(in_state);
         for (const vector<Action>& spend : spends)
@@ -1552,6 +1544,16 @@ public:
 
             StateChange change{ in_state };
             change.add(spend);
+
+            opGuard.clear();
+            opCreature.clear();
+            for (const Card& card : change.state.opBoard)
+            {
+                if (card.guard)
+                    opGuard.push_back(card);
+                else
+                    opCreature.push_back(card);
+            }
 
             vector<Action> guard_kills = kill_guards(change.state, opGuard);
             change.add(guard_kills);
