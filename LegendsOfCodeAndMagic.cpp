@@ -80,6 +80,7 @@ void mutate_params(Params& p, mt19937& re)
         {
             int& i = reinterpret_cast<int*>(&p.i)[n];
             i += uniform_int_distribution<int>(-2, 2)(re);
+            i = max(i, 0);
         }
         else
         {
@@ -112,15 +113,16 @@ ostream& operator<<(ostream& out, const Params& p)
     return out;
 }
 
-void improve_params(Params p, const vector<Params>& vs)
+void improve_params(Params p, const vector<Params>& vs, int turns=1000)
 {
     int seed = int(std::chrono::duration_cast<std::chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count());
     mt19937 re(seed);
-    double bestSc = eval_params(p, vs);
+    double bestSc = eval_params(p, vs, turns);
     size_t n = 1;
     map<size_t, pair<Params, double>> ltBest;
-    size_t last_revert = 0;
+    size_t last_revert = 4;
     double last_revert_sc = bestSc;
+    ltBest[last_revert] = { p, bestSc };
 
     while (!_kbhit())
     {
@@ -130,17 +132,17 @@ void improve_params(Params p, const vector<Params>& vs)
         size_t qn = 0;
         for (size_t i = 0; i < n; i++)
         {
-            tscq += eval_params(q, vs);
+            tscq += eval_params(q, vs, turns);
             qn++;
             scq = tscq / qn;
             if (scq < bestSc)
                 break;
         }
-        double scp = eval_params(p, vs);
+        double scp = eval_params(p, vs, turns);
         bestSc = (bestSc * n + scp) / (n + 1);
         n++;
         cerr << scq << " vs " << bestSc << " / " << n << endl;
-        if (scq >= bestSc || uniform_int_distribution<int>(0, 20)(re) == 0)
+        if (scq >= bestSc || (last_revert != 0 && uniform_int_distribution<int>(0, 20)(re) == 0))
         {
             last_revert = 0;
             p = q;
@@ -417,11 +419,12 @@ int main()
     2.11415, 9.90068, 2.76794, 3.53121, -4.14335, 0.793132, -0.0690288, 4.47708,
     3.21989, 0.0461234, 0.204016, -0.152393, 0.949387, -2.95691, -1.19392,
     } };
+
     Params current =
     {};
 
-    improve_params(current, { gold2b, gold2 });
+    //improve_params(current, { gold2b, gold2 }, 200);
     //tournament({ gold27, gold29, gold54, gold51, gold26, current });
-    //cout << eval_new_vs_old(current, 1000);
+    cout << eval_new_vs_old(gold2, 10000) << endl;
 	return 0;
 }

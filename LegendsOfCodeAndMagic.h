@@ -672,7 +672,7 @@ struct GameRules : public T
         card.drain = card.drain && !effect.drain;
         card.guard = card.guard && !effect.guard;
         card.lethal = card.lethal && !effect.lethal;
-        card.attack += effect.attack;
+        card.attack = max(0, card.attack + effect.attack);
         card.ward = card.ward && !effect.ward;
         if (card.ward)
         {
@@ -1139,6 +1139,73 @@ public:
         return { best_actions, best_score };
     }
 
+    vector<Action> best_group_attack(const VisibleState& in_state, const BoardCards& to_kill, bool allow_face)
+    {
+        vector<Action> best_actions;
+        double best_score = bad_score;
+        double init_score = score_state(in_state);
+
+        MaxVector<int, 6> attackers;
+        for (const Card& card : in_state.myBoard)
+        {
+            if (card.used)
+                continue;
+            attackers.push_back(card.instanceId);
+        }
+
+        MaxVector<int, 6> defenders;
+        for (const Card& card : to_kill)
+            defenders.push_back(card.instanceId);
+
+        if (attackers.empty() || defenders.empty())
+            return {};
+
+        sort(attackers.begin(), attackers.end());
+        sort(defenders.begin(), defenders.end());
+
+        StateChange change;
+        const auto def_begin = defenders.begin();
+        const auto def_end = defenders.end();
+
+        do {
+            do
+            {
+                change = { in_state };
+                auto p_def = def_begin;
+                for (int id : attackers)
+                {
+                    int def_id = -1;
+                    while (p_def != def_end)
+                    {
+                        if (get_card(change.state.opBoard, *p_def))
+                        {
+                            def_id = *p_def;
+                            break;
+                        }
+                        else
+                        {
+                            p_def++;
+                        }
+                    }
+                    if (def_id == -1 && !allow_face)
+                        break;
+
+                    Action attack = { Action::ATTACK, id, def_id };
+                    change.add(attack);
+                }
+
+                double score = score_state(change.state);
+                if (score > best_score)
+                {
+                    best_score = score;
+                    best_actions = change.actions;
+                }
+            } while (next_permutation(attackers.begin(), attackers.end()));
+        } while (next_permutation(defenders.begin(), defenders.end()));
+
+        return best_actions;
+    }
+
     vector<Action> get_item_actions(const Card& card, const VisibleState& state)
     {
         vector<Action> actions;
@@ -1505,63 +1572,51 @@ public:
 
     vector<Action> kill_guards(const VisibleState& in_state, BoardCards opGuard)
     {
-        StateChange change { in_state };
-        while (!opGuard.empty())
-        {
-            pair<vector<Action>, double> attack = find_best_creature_kill(change.state, opGuard);
-            if (attack.first.empty())
-            {
-                pair<Action, double> attack = find_best_creature_attack(change.state, opGuard);
-                if (attack.first.what != Action::ATTACK)
-                    break;
-                change.add(attack.first);
-            }
-            else
-            {
-                change.add(attack.first);
-            }
-        }
-        return change.actions;
+        vector<Action> actions = best_group_attack(in_state, opGuard, false);
+        return actions;
     }
 
     vector<Action> best_attacks(const VisibleState& in_state, BoardCards opCreature)
     {
-        // split the remaining attacks
         double best_score = bad_score;
         vector<Action> best_attacks;
-        vector<Action> attacks;
-        for (;;)
+
+        // for each subset of creatures
+        size_t n = opCreature.size();
+        int n_subsets = 1 << n;
+        for (int subset_bits = 0; subset_bits < n_subsets; subset_bits++)
         {
-            // try the current attack actions, then face hit
-            StateChange attack_change{ in_state };
-            attack_change.add(attacks);
-            StateChange post_attack{ attack_change.state };
-            for (const Card& card : attack_change.state.myBoard)
+            BoardCards creatures;
+
+            for (size_t i = 0; i < n; i++)
+            {
+                if (subset_bits & (1 << i))
+                {
+                    const Card& card = opCreature[i];
+                    creatures.push_back(card);
+                }
+            }
+
+            vector<Action> actions = best_group_attack(in_state, creatures, true);
+            StateChange change = { in_state };
+            change.add(actions);
+
+            BoardCards board = change.state.myBoard;
+            for (const Card& card : board)
             {
                 if (card.used)
                     continue;
                 Action face_hit = { Action::ATTACK, card.instanceId, -1 };
-                attack_change.add(face_hit);
+                change.add(face_hit);
             }
 
-            // score that
-            double score = score_state(attack_change.state);
+            double score = score_state(change.state);
             if (score > best_score)
             {
                 best_score = score;
-                best_attacks = attack_change.actions;
+                best_attacks = change.actions;
             }
-
-            // try to add another creature attack
-            pair<vector<Action>, double> attack = find_best_creature_kill(post_attack.state, opCreature);
-            if (attack.first.empty())
-                break;
-            if (attack.second < 0)
-                break;
-            for (auto action : attack.first)
-                attacks.push_back(action);
         }
-
         return best_attacks;
     }
 };
@@ -1619,18 +1674,18 @@ inline string boards_diff(const BoardCards& a, const BoardCards& b, string who)
 
 const Params current_best_params =
 { {
--6, 4, 6, 5, 3, 3, 2, 2,
-0, -1, -1, 2, -8,
+-5, 3, 5, 4, 2, -1, -13, 1,
+-5, -7, 5, -12, -4,
 },
 {
-4.06207, 2.03524, 0.0841488, 0.452104, -1, -2.48791, 0.0521824, -1.83897,
-0.296102, 2.59306, 0.347211, 16.0734, 10.7129, -1.02896, 1.38201, 1.74293,
-0.118754, 4.87799, -0.0208954, -0.145531, 0.190254, 2.04928, 2.38476, 0,
-0.34711, -0.447726, 0.459148, 0.601652, 1.03895, 0.172126, 1.44974, 0.573184,
-1.18672, -1.08429, 0.892135, -1.70675, 3.10331, 141.276, 74.8257, 0.885351,
-8.54586, 0.41823, 0.233728, -0.12302, -0.460249, 1.15114, 0.28792, -1.1334,
-2.11415, 9.90068, 2.76794, 3.53121, -4.14335, 0.793132, -0.0690288, 4.47708,
-3.21989, 0.0461234, 0.204016, -0.152393, 0.949387, -2.95691, -1.19392,
+4.73095, 2.68304, 0.236421, 0.717338, -1.03961, 0.883133, 0.0994785, 1.18619,
+2.16072, 2.70415, 0.693665, 17.6778, 11.3714, -0.958515, -2.40779, 3.2706,
+-0.790726, -2.26678, -1.96172, 0.152949, 0.0641518, 2.30234, 2.53189, 0,
+-1.63735, 0.337842, -0.468753, -0.299272, -1.83165, -1.70411, 4.95859, 1.15357,
+0.352331, -1.48017, 0.215066, -3.63714, -0.73088, 107.654, 12.4766, 2.23271,
+-0.0201277, 2.25825, -3.23735, -0.690174, -2.29374, -3.93088, -1.13206, -0.90098,
+4.96106, 8.88133, -3.21313, 2.45326, -0.213814, 0.12347, -6.4973, 5.5528,
+5.10403, 0.357561, 2.78479, -0.42423, 0.751112, 0.499989, -4.67846,
 } };
 
 inline void codingame_loop()
