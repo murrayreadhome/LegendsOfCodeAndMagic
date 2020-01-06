@@ -929,6 +929,10 @@ struct DoubleParams
     double item_m_d = 0;
     double attr_lw = 0;
     double draft_attr_lw = 0;
+    double wanted_a = 0;
+
+    double wanted_m = 1;
+    double card_rank[160] = { 0, };
 };
 
 struct Params
@@ -943,9 +947,10 @@ public:
     Deck deck;
     vector<int> cost_counts;
     const Params v;
+    int draft_algo;
 
     Player(Params params = Params())
-        : cost_counts(13, 0), v(params)
+        : cost_counts(13, 0), v(params), draft_algo(2)
     {}
 
     double draft_card_value(const Card& card)
@@ -993,14 +998,15 @@ public:
             required += max(0, v.i.curve[i] - cost_counts[i]);
         double flexibility = max(v.d.flex_min, 1.0 - v.d.flex_pen * required / (30 - deck.size()));
 
-        auto best_card = find_best(state.myHand.begin(), state.myHand.end(), [&](const Card& card) 
+        auto best_card = find_best(state.myHand.begin(), state.myHand.end(), [&](const Card& card)
         {
             double value = draft_card_value(card);
             int wanted_value = v.i.curve[card.cost] - cost_counts[card.cost];
             if (wanted_value > 0)
-                value += wanted_value;
+                value += v.d.wanted_m * wanted_value + v.d.wanted_a;
             else
                 value *= flexibility;
+            value += v.d.card_rank[card.number - 1];
             return value;
         }).first;
 
@@ -1055,88 +1061,6 @@ public:
         score += v.d.num_board * (state.myBoard.size() - state.opBoard.size());
         score += ((v.d.draw_30 * state.me.draw * state.me.deck) + (v.d.draw_0 * state.me.draw * (30 - state.me.deck))) / 30;
         return score;
-    }
-
-    pair<Action, double> find_best_creature_attack(const VisibleState& state, BoardCards& opBoard)
-    {
-        double best_score = bad_score;
-        Action best_action = { Action::PASS };
-        double init_score = score_state(state);
-        for (const Card& my : state.myBoard)
-        {
-            if (my.used)
-                continue;
-
-            for (const Card& op : opBoard)
-            {
-                Action attack = { Action::ATTACK, my.instanceId, op.instanceId };
-                if (!state.can(attack))
-                    continue;
-                VisibleState tmp = state;
-                tmp.act(attack);
-                double score = score_state(tmp) - init_score;
-                if (score > best_score)
-                {
-                    best_score = score;
-                    best_action = attack;
-                }
-            }
-        }
-        return { best_action, best_score };
-    }
-
-    pair<vector<Action>, double> find_best_creature_kill(const VisibleState& state, BoardCards& opBoard)
-    {
-        vector<Action> best_actions, actions;
-        double best_score = bad_score;
-        double init_score = score_state(state);
-
-        MaxVector<int, 6> attackers;
-        int max_attack = 0;
-        for (const Card& card : state.myBoard)
-        {
-            if (card.used)
-                continue;
-            max_attack += card.attack;
-            if (card.lethal)
-                max_attack += 100;
-            attackers.push_back(card.instanceId);
-        }
-
-        for (const Card& op : opBoard)
-        {
-            if (max_attack < op.defense)
-                continue;
-            int opId = op.instanceId;
-            sort(attackers.begin(), attackers.end());
-            do 
-            {
-                VisibleState tmp = state;
-                actions.clear();
-                bool killed = false;
-                for (int id : attackers)
-                {
-                    Action attack = { Action::ATTACK, id, opId };
-                    if (!tmp.can(attack))
-                        break;
-                    actions.push_back(attack);
-                    tmp.act(attack);
-                    if (!get_card(tmp.opBoard, opId))
-                    {
-                        killed = true;
-                        break;
-                    }
-                }
-                double score = score_state(tmp) - init_score;
-                if (score > best_score)
-                {
-                    best_score = score;
-                    best_actions = actions;
-                }
-            } while (next_permutation(attackers.begin(), attackers.end()));
-        }
-
-        return { best_actions, best_score };
     }
 
     vector<Action> best_group_attack(const VisibleState& in_state, const BoardCards& to_kill, bool allow_face)
@@ -1246,161 +1170,6 @@ public:
         }
         }
         return actions;
-    }
-
-    void play_greedy_card(StateChange& change, const Card& card)
-    {
-        switch (card.cardType)
-        {
-        case Creature:
-        {
-            Action summon = { Action::SUMMON, card.instanceId };
-            if (change.state.can(summon))
-            {
-                change.add(summon);
-            }
-            break;
-        }
-        case Green:
-        {
-            auto best = find_best(change.state.myBoard.begin(), change.state.myBoard.end(), [&](const Card& myCard)
-            {
-                Action use = { Action::USE, card.instanceId, myCard.instanceId };
-                if (!change.state.can(use))
-                    return bad_score;
-                VisibleState tmp_state = change.state;
-                tmp_state.act(use);
-                return score_state(tmp_state);
-            });
-            if (best.second > bad_score && best.first != change.state.myBoard.end())
-            {
-                Action use = { Action::USE, card.instanceId, best.first->instanceId };
-                change.add(use);
-            }
-            break;
-        }
-        case Blue:
-            if (card.defense == 0)
-            {
-                Action use = { Action::USE, card.instanceId, -1 };
-                if (change.state.can(use))
-                {
-                    change.add(use);
-                }
-                break;
-            }
-            // else deliberate fall through
-        case Red:
-        {
-            auto best = find_best(change.state.opBoard.begin(), change.state.opBoard.end(), [&](const Card& opCard)
-            {
-                Action use = { Action::USE, card.instanceId, opCard.instanceId };
-                if (!change.state.can(use))
-                    return bad_score;
-                VisibleState tmp_state = change.state;
-                tmp_state.act(use);
-                return score_state(tmp_state);
-            });
-            if (best.second > bad_score && best.first != change.state.opBoard.end())
-            {
-                Action use = { Action::USE, card.instanceId, best.first->instanceId };
-                change.add(use);
-            }
-            break;
-        }
-        }
-    }
-
-    pair<vector<Action>, double> greedy_spend(const VisibleState& in_state)
-    {
-        StateChange change{ in_state };
-        
-        bool found = true;
-        while (found)
-        {
-            sort(change.state.myHand.begin(), change.state.myHand.end(), [](const Card& a, const Card& b) { return a.cost > b.cost; });
-            found = false;
-            double current_score = score_state(change.state);
-
-            for (Card& card : change.state.myHand)
-            {
-                size_t before = change.actions.size();
-                play_greedy_card(change, card);
-                found = change.actions.size() > before;
-                if (found)
-                    break;
-            }
-        }
-
-        return { change.actions, score_state(change.state) };
-    }
-
-    pair<vector<Action>, double> deploy_cards(const VisibleState& in_state, HandCards cards)
-    {
-        StateChange change{ in_state };
-
-        // creatures first
-        sort(cards.begin(), cards.end(), [](const Card& a, const Card& b) { return a.cardType < b.cardType; });
-        for (const Card& card : cards)
-            play_greedy_card(change, card);
-
-        return { change.actions, score_state(change.state) };
-    }
-
-    vector<Action> find_best_spend(const VisibleState& in_state)
-    {
-        vector<Action> best_actions;
-        double best_score;
-        tie(best_actions, best_score) = greedy_spend(in_state);
-
-        struct BestCards
-        {
-            double score;
-            HandCards cards;
-        };
-
-        int m = in_state.me.mana;
-        vector<BestCards> best_cards(m + 1, { bad_score });
-
-        HandCards held = in_state.myHand;
-        sort(held.begin(), held.end(), [](const Card& a, const Card& b) 
-        { 
-            if (a.cardType != b.cardType)
-                return a.cardType < b.cardType;
-            else
-                return a.cost < b.cost; 
-        });
-        for (const Card& card : held)
-        {
-            for (int i = m - card.cost; i>=0; i--)
-            {
-                const BestCards& from = best_cards[i];
-                if (i > 0 && from.cards.empty())
-                    continue;
-
-                HandCards new_cards = from.cards;
-                if (new_cards.full())
-                    continue;
-
-                new_cards.push_back(card);
-                pair<vector<Action>, double> deployment = deploy_cards(in_state, new_cards);
-
-                BestCards& to = best_cards[i + card.cost];
-                if (to.cards.empty() || to.score < deployment.second)
-                {
-                    to.cards = new_cards;
-                    to.score = deployment.second;
-                }
-
-                if (deployment.second > best_score)
-                {
-                    best_score = deployment.second;
-                    best_actions = deployment.first;
-                }
-            }
-        }
-
-        return best_actions;
     }
 
     vector<vector<Action>> find_best_spends(const VisibleState& in_state)
@@ -1676,18 +1445,39 @@ inline string boards_diff(const BoardCards& a, const BoardCards& b, string who)
 
 const Params current_best_params =
 { {
--5, 3, 5, 4, 2, -1, -13, 1,
--5, -7, 5, -12, -4,
+-1, 6, 13, 7, 1, 4, -2, 11,
+4, 7, 5, 6, 3,
 },
 {
-4.73095, 2.68304, 0.236421, 0.717338, -1.03961, 0.883133, 0.0994785, 1.18619,
-2.16072, 2.70415, 0.693665, 17.6778, 11.3714, -0.958515, -2.40779, 3.2706,
--0.790726, -2.26678, -1.96172, 0.152949, 0.0641518, 2.30234, 2.53189, 0,
--1.63735, 0.337842, -0.468753, -0.299272, -1.83165, -1.70411, 4.95859, 1.15357,
-0.352331, -1.48017, 0.215066, -3.63714, -0.73088, 107.654, 12.4766, 2.23271,
--0.0201277, 2.25825, -3.23735, -0.690174, -2.29374, -3.93088, -1.13206, -0.90098,
-4.96106, 8.88133, -3.21313, 2.45326, -0.213814, 0.12347, -6.4973, 5.5528,
-5.10403, 0.357561, 2.78479, -0.42423, 0.751112, 0.499989, -4.67846,
+3.78176, 2.27847, 0.0166833, -0.980151, -0.947445, 33.5404, 17.4131, 0.00479656,
+1.1096, 0.923549, 1.22567, 10.3015, 8.27899, -3.49226, -0.282961, -1.45265,
+3.82426, 0.0540937, 0.00763259, 0.0327861, 0.00549592, 1.93033, 1.91819, 0,
+1.12176, -1.1315, -0.418995, -2.43871, 5.73248, 0.100988, -0.240722, 10.4513,
+-4.53145, 0.105382, -0.0103765, 0.232206, 0.248822, -2.08133, 15.6741, 1.39542,
+5.80601, -0.377957, 5.79562, 0.284378, -0.378682, -3.7905, -1.57748, 6.4282,
+32.0869, -5.32061, -3.17495, 0.123833, -2.29089, -20.4795, 3.29916, 2.7536,
+19.8089, -0.308248, 0.047914, -5.21434, -0.216936, 10.8521, 0.199783, -71.4011,
+-0.345507, 2.31589, 4.9958, 2.46491, -43.7672, -1.59307, 2.53636, 19.8707,
+2.4879, 2.5923, -0.752065, 2.3802, -0.837277, 1.09837, -2.16702, 0.618754,
+0.626427, 2.54622, 5.85363, 2.76393, -2.39719, 1.37376, -0.0185826, 0.612887,
+-0.128077, 78.5252, 0.756394, -49.2859, 0.366425, 3.60823, 1.15797, 0.279169,
+8.3679, 1.26423, 1.83058, -0.826833, 0.140494, 5.16522, -1.03971, 0.211041,
+-1.01487, -1.10138, -2.82287, -0.0688443, 5.99569, -0.494972, -0.273572, -6.34909,
+14.4817, 8.25746, 1.91974, 20.1423, 6.07051, 5.70523, 15.6083, -9.75033,
+-0.476484, -5.7269, -8.19008, 1.04576, -2.18714, -0.392844, 0.382633, -12.9847,
+2.55248, 14.7595, 2.92896, 10.0129, 21.9328, 87.4715, 4.63391, -3.00938,
+0.129781, 3.54199, 0.179876, 15.6458, -1.43098, -1.39347, 0.316109, 1.93974,
+5.01447, 4.05324, 3.12896, -0.759691, -1.15703, 1.38218, -1.12143, -8.25107,
+-1.85438, -0.839096, -15.9068, 2.13183, -7.70588, 1.59563, 0.385365, 5.09804,
+3.56938, -1.05118, 0.331022, 4.73971, -2.97385, -0.121908, -0.534561, 3.31087,
+1.23518, 0.790702, -0.122157, -1.65914, 2.11437, 1.10963, -14.8114, 1.40025,
+0.593086, -1.32683, 5.01998, -147.723, 8.85197, -2.06003, 1.31133, 0.763284,
+-3.80368, 0.771437, -0.885968, -1.03139, -3.54288, 0.329537, -4.26409, -0.738415,
+-8.38251, 0.404535, -110.257, -0.130707, -0.78001, 0.00559426, -1.09502, -7.4394,
+-2.36929, -5.58205, -5.52112, 1.2887, -3.89651, -27.0482, 0.944629, -1.48408,
+2.33833, -0.812411, -0.982722, 3.59921, 2.15339, -0.378168, -0.954943, -9.22712,
+3.02106, -2.26208, -0.0931685, 0.0191906, -14.5982, -0.0606538, -1.01998, -1.93773,
+-3.55546,
 } };
 
 inline void codingame_loop()

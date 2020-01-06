@@ -7,45 +7,8 @@ class OldPlayer1 : public Player
 public:
     OldPlayer1(Params params = Params())
         : Player(params)
-    {}
-
-    Action draftAction(const VisibleState& state)
     {
-        int required = 0;
-        for (int i = 0; i < 13; i++)
-            required += max(0, v.i.curve[i] - cost_counts[i]);
-        double flexibility = max(v.d.flex_min, 1.0 - v.d.flex_pen * required / (30 - deck.size()));
-
-        auto best_card = find_best(state.myHand.begin(), state.myHand.end(), [&](const Card& card)
-        {
-            double value = draft_card_value(card);
-            int wanted_value = v.i.curve[card.cost] - cost_counts[card.cost];
-            if (wanted_value > 0)
-                value += wanted_value;
-            else
-                value *= flexibility;
-            return value;
-        }).first;
-
-        deck.push_back(*best_card);
-        cost_counts[best_card->cost]++;
-        return Action{ Action::PICK, int(best_card - state.myHand.begin()) };
-    }
-
-    double score_state(const VisibleState& state)
-    {
-        double score = v.d.health * (state.me.health - state.op.health);
-        if (state.op.health <= 0)
-            score += 1e99;
-        for (const Card& card : state.myHand)
-            score += battle_card_value(card) * v.d.my_hand;
-        for (const Card& card : state.myBoard)
-            score += battle_card_value(card) * v.d.my_board;
-        for (const Card& card : state.opBoard)
-            score -= battle_card_value(card, true) * v.d.op_board;
-        score += v.d.num_board * (state.myBoard.size() - state.opBoard.size());
-        score += ((v.d.draw_30 * state.me.draw * state.me.deck) + (v.d.draw_0 * state.me.draw * (30 - state.me.deck))) / 30;
-        return score;
+        draft_algo = 1;
     }
 
     pair<Action, double> find_best_creature_attack(const VisibleState& state, BoardCards& opBoard)
